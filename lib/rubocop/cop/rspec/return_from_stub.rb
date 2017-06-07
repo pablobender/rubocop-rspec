@@ -7,9 +7,9 @@ module RuboCop
       #
       # Enforces either `and_return` or block-style return in the cases
       # where the returned value is constant. Ignores dynamic returned values
-      # are the result would be different
+      # as the result would be different.
       #
-      # This cop can be configured using the `EnforcedStyle` option
+      # This cop can be configured using the `EnforcedStyle` option.
       #
       # @example `EncorcedStyle: block`
       #   # bad
@@ -49,7 +49,7 @@ module RuboCop
 
         def_node_matcher :and_return_value, <<-PATTERN
             (send
-              (send nil :receive (...)) :and_return $(...)
+              (send nil :receive $(...)) :and_return $(...)
             )
         PATTERN
 
@@ -63,8 +63,18 @@ module RuboCop
         def on_send(node)
           return unless style == :block
 
-          and_return_value(node) do |args|
+          and_return_value(node) do |_message, args|
             add_offense(node, :expression, MSG_BLOCK) unless dynamic?(args)
+          end
+        end
+
+        def autocorrect(node)
+          lambda do |corrector|
+            if style == :and_return
+              autocorrect_block_to_method(node, corrector)
+            else
+              autocorrect_method_to_block(node, corrector)
+            end
           end
         end
 
@@ -76,6 +86,37 @@ module RuboCop
           end
 
           !node.literal?
+        end
+
+        def autocorrect_block_to_method(node, corrector)
+          receive_with_block(node) do |args|
+            replacement = ".and_return(#{args.source})"
+            corrector.replace(block_range_with_space(node), replacement)
+          end
+        end
+
+        def autocorrect_method_to_block(node, corrector)
+          and_return_value(node) do |message, args|
+            replacement = "receive(#{message.source}) { #{args.source} }"
+            corrector.replace(node.loc.expression, replacement)
+          end
+        end
+
+        def block_range_with_space(node)
+          block_range = range_between(begin_pos_for_replacement(node),
+                                      node.loc.end.end_pos)
+          range_with_surrounding_space(block_range, :left)
+        end
+
+        def begin_pos_for_replacement(node)
+          block_send_or_super, _block_args, _block_body = *node
+          expr = block_send_or_super.source_range
+
+          if (paren_pos = (expr.source =~ /\(\s*\)$/))
+            expr.begin_pos + paren_pos
+          else
+            node.loc.begin.begin_pos
+          end
         end
       end
     end
